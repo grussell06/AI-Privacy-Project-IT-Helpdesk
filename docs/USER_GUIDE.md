@@ -1,8 +1,59 @@
 # User Guide
 
-## M1 tech spike
+## M2 privacy gateway
 
-The current executable is a small runtime check. It reads one line and prints that line back. It is not yet a privacy gateway and does not mask sensitive values.
+The M2 program reads one JSON request from standard input and prints one JSON response.
+
+### Request
+
+```json
+{
+  "request_id": "r1",
+  "text": "Maya Chen cannot connect LT-48291 to Wi-Fi. Ticket INC-1042."
+}
+```
+
+### Run
+
+From the repository root in PowerShell:
+
+```powershell
+@'
+{"request_id":"r1","text":"Maya Chen cannot connect LT-48291 to Wi-Fi. Ticket INC-1042."}
+'@ | python src/main.py
+```
+
+### Successful response
+
+```json
+{
+  "status": "ok",
+  "request_id": "r1",
+  "output": "Summary: Maya Chen cannot connect LT-48291 to Wi-Fi. Ticket INC-1042.\nSuggested steps:\n1. Confirm the reported symptoms and recent changes.\n2. Check the affected device and relevant connection or account settings."
+}
+```
+
+### Supported synthetic formats
+
+- Names listed in `src/data/synthetic_names.txt`
+- Email addresses such as `maya.chen@example.test`
+- Asset IDs in the form `LT-48291`
+- Ticket numbers in the form `INC-1042`
+
+Input containing `[[...]]` is rejected because that syntax is reserved for gateway placeholders. Invalid provider placeholders produce a controlled `INVALID_PLACEHOLDER` response.
+
+### Run automated tests
+
+```powershell
+$env:PYTHONPATH='src'
+python -m unittest discover -s tests -v
+```
+
+The command-line JSON fields remain subject to confirmation against the separate course I/O Contract.
+
+## Retained M1 tech spike
+
+The repository retains the earlier M1 runtime check for milestone history. It reads one line and prints that line back; the M2 executable is `src/main.py`.
 
 ### Requirements
 
@@ -28,7 +79,7 @@ Echo: Ticket INC-1042 reports a Wi-Fi problem.
 
 ### Current limitations
 
-The M1 program only echoes input. It does not detect sensitive data, mask identifiers, contact a provider, validate responses, or restore values. Those features begin in M2.
+The retained M1 program only echoes input. Use `src/main.py` for the M2 privacy gateway.
 
 ### Data warning
 

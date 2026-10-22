@@ -4,44 +4,48 @@
 
 This project explores whether an IT support technician can use an AI system to summarize help-desk tickets while keeping sensitive identifiers local.
 
-The planned gateway will detect selected sensitive values, replace them with placeholders, send only masked text to an offline mock AI provider, validate the response, and restore authorized values locally.
+The gateway detects selected sensitive values, replaces them with placeholders, sends only masked text to a deterministic offline mock provider, validates the response, and restores authorized values locally.
 
 ## Intended user and task
 
 The intended user is an internal IT support technician.
 
-The system will transform one synthetic IT support ticket into:
+The system transforms one synthetic IT support ticket into:
 
 - A concise description of the technical problem
 - A short list of suggested troubleshooting steps
 
 ## Sensitive-data categories
 
-The project plans to protect:
+The M2 prototype protects:
 
-- Employee names
+- Employee names from a local synthetic term list
 - Email addresses
 - Device asset IDs
 - Ticket numbers
 
-Only synthetic data will be used.
+Only synthetic data is used.
 
 ## Current milestone
 
-This repository currently contains the M1 requirements and design work.
+This repository currently contains the M2 working prototype.
 
-M1 includes:
+M2 includes:
 
-- Project requirements and scope
-- Planned acceptance cases
-- Python and TypeScript comparison
-- System architecture and privacy boundary
-- Placeholder design
-- Initial provider prompt
-- Read-and-echo tech spike
-- Assistance record
+- A complete input-to-output privacy pipeline
+- Exact name matching from a local synthetic term list
+- Structured patterns for emails, asset IDs, and ticket numbers
+- Local masking and request-local placeholder mappings
+- A deterministic offline mock provider
+- Provider-response validation
+- Local restoration of authorized placeholders
+- Preservation of repeated values
+- Different placeholders for different entities
+- Controlled errors for invalid reserved placeholders
+- Eight automated tests
+- Updated design, evaluation, user guide, and assistance records
 
-A working privacy gateway is not required until M2.
+A real AI API, graphical interface, multi-turn conversation, MASK/REMOVE policy, and prompt comparison are not required for M2.
 
 ## Repository structure
 
@@ -53,8 +57,17 @@ A working privacy gateway is not required until M2.
 │   ├── DESIGN.md
 │   ├── EVALUATION.md
 │   └── USER_GUIDE.md
-└── src/
-    └── tech_spike.py
+├── src/
+│   ├── data/
+│   │   └── synthetic_names.txt
+│   ├── privacy_gateway/
+│   │   ├── __init__.py
+│   │   ├── cli.py
+│   │   └── gateway.py
+│   ├── main.py
+│   └── tech_spike.py
+└── tests/
+    └── test_gateway.py
 ```
 
 ## Requirements
@@ -67,30 +80,52 @@ Check your installed version with:
 python --version
 ```
 
-## Run the tech spike
+## Run the privacy gateway
 
-From the repository’s root directory, run:
+From the repository's root directory in PowerShell, run:
 
 ```powershell
-python src/tech_spike.py
+@'
+{"request_id":"r1","text":"Maya Chen cannot connect LT-48291 to Wi-Fi. Ticket INC-1042."}
+'@ | python src/main.py
 ```
 
-Example interaction:
+Expected output:
+
+```json
+{
+  "status": "ok",
+  "request_id": "r1",
+  "output": "Summary: Maya Chen cannot connect LT-48291 to Wi-Fi. Ticket INC-1042.\nSuggested steps:\n1. Confirm the reported symptoms and recent changes.\n2. Check the affected device and relevant connection or account settings."
+}
+```
+
+The original protected values are masked before the offline provider receives the ticket. They are restored only after the provider response passes local validation.
+
+## Run the automated tests
+
+From the repository's root directory in PowerShell, run:
+
+```powershell
+$env:PYTHONPATH='src'
+python -m unittest discover -s tests -v
+```
+
+Expected result:
 
 ```text
-Input: Ticket INC-1042 reports a Wi-Fi problem.
-Echo: Ticket INC-1042 reports a Wi-Fi problem.
+Ran 8 tests
+OK
 ```
-
-The M1 tech spike only verifies that Python can read and echo text. It does not perform detection, masking, validation, or restoration.
 
 ## Documentation
 
-- `docs/DESIGN.md` contains the requirements, architecture, language comparison, placeholder design, initial prompt, and M2 scope.
-- `docs/EVALUATION.md` contains the planned synthetic acceptance cases.
-- `docs/USER_GUIDE.md` contains detailed setup and usage instructions.
+- `docs/DESIGN.md` contains the requirements, architecture, language reasoning, implemented components, placeholder design, prompt, and execution trace.
+- `docs/EVALUATION.md` contains the synthetic acceptance cases, automated-test evidence, and observed results.
+- `docs/USER_GUIDE.md` contains detailed setup, usage, supported formats, errors, and troubleshooting information.
 - `docs/ASSISTANCE.md` records important assistance, project decisions, and verification.
 
 ## Data and privacy notice
 
-Do not use real support tickets, employee information, credentials, API keys, or private records. All project inputs and examples must be synthetic.
+Do not use real support tickets, employee information, credentials, API keys, or private records. All project inputs, term-list entries, and examples must be synthetic.
+

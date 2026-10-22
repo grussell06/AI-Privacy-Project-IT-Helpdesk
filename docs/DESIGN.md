@@ -6,18 +6,18 @@ The intended user is an internal IT support technician. The technician receives 
 
 The motivation is to preserve the useful technical context while preventing unnecessary disclosure of identifiers to an external AI provider. A summary such as "Windows laptop cannot connect to the office Wi-Fi after a password reset" remains useful without exposing the employee's name, email address, device asset ID, or ticket number.
 
-## Sensitive-data categories
+## Implemented M2 sensitive-data categories
 
-The planned final system supports four categories:
+The M2 prototype supports four categories:
 
-| Category | Synthetic example | Planned detection method |
----
+| Category | Synthetic example | Implemented detection method |
+| --- | --- | --- |
 | Employee name | Maya Chen | Exact match from a local synthetic term list |
 | Email address | maya.chen@example.test | Documented structured pattern |
 | Device asset ID | LT-48291 | Documented structured pattern such as `LT-[0-9]{5}` |
 | Ticket number | INC-1042 | Documented structured pattern such as `INC-[0-9]{4}` |
 
-Names will come from a local, synthetic allowlist because universal name recognition is outside the project scope. Structured patterns will be intentionally narrow and documented to keep behavior explainable.
+Names come from the local synthetic term list at `src/data/synthetic_names.txt` because universal name recognition is outside the project scope. The structured patterns are intentionally narrow and documented to keep behavior explainable.
 
 ## Useful output and success criteria
 
@@ -30,7 +30,7 @@ A successful final output:
 5. never sends an original protected value in the outbound provider payload;
 6. returns a controlled error instead of unsafe output when placeholder validation fails.
 
-For the M1 design, these criteria are represented by specific planned acceptance cases in `docs/EVALUATION.md`. M2 will automate the applicable cases.
+The relevant criteria are exercised by the automated M2 acceptance cases in `tests/test_gateway.py` and recorded in `docs/EVALUATION.md`.
 
 ## Non-goals
 
@@ -44,7 +44,7 @@ For the M1 design, these criteria are represented by specific planned acceptance
 
 ## M2 scope
 
-M2 will implement one command-line, single-turn pipeline using synthetic tickets and an offline deterministic mock provider. It will include:
+M2 implements one command-line, single-turn pipeline using synthetic tickets and an offline deterministic mock provider. It includes:
 
 - local exact matching for synthetic employee names;
 - structured matching for email addresses, asset IDs, and ticket numbers;
@@ -54,7 +54,21 @@ M2 will implement one command-line, single-turn pipeline using synthetic tickets
 - automated versions of the relevant M1 acceptance cases;
 - controlled failure for invalid reserved placeholders.
 
-Full category policy, cross-request isolation, overlap hardening, simulated provider failures, and prompt comparison remain later-milestone work unless a small supporting piece is needed earlier.
+MASK/REMOVE category policy, full cross-request state-lifetime testing, overlap hardening, simulated provider failures, and prompt comparison remain later-milestone work. The M2 validator does reject a foreign request token as a supplementary safety check, but this does not replace later cross-request isolation work.
+
+## M2 implementation
+
+The working prototype implements one complete request through these classes:
+
+- `Detector` loads a local synthetic name list and applies documented patterns.
+- `Masker` issues request-scoped placeholders and stores the local mapping.
+- `MockProvider` returns deterministic offline output.
+- `ResponseValidator` rejects malformed, unknown, and foreign-request placeholders.
+- `Restorer` replaces only tokens present in the current request mapping.
+- `PrivacyGateway` controls the pipeline and keeps the mapping inside one call.
+- `cli.py` converts between command-line JSON and controlled result objects.
+
+The JSON wrapper is isolated because the separate course I/O Contract was not available in the project files when this prototype was implemented. Its field names must be checked against that specification before the M2 submission.
 
 ## Data flow and trust boundary
 
@@ -64,7 +78,7 @@ LOCAL MACHINE                                         EXTERNAL/PROVIDER SIDE
 Synthetic ticket
       |
       v
-Detector -> policy -> masker -> masked request ---------> provider/mock
+Detector -> masker -> masked request -------------------> provider/mock
                          |                                    |
                          | request-local mapping              |
                          | stays local                        v
@@ -77,7 +91,7 @@ Detector -> policy -> masker -> masked request ---------> provider/mock
                          final summary or error
 ```
 
-Only the masked ticket and versioned task prompt may cross the boundary. Detection rules, original values, placeholder mappings, policy decisions, validation results, and restored output stay local. The response must be validated before restoration.
+Only the masked ticket and versioned task prompt may cross the boundary. Detection rules, detection results, original values, placeholder mappings, validation results, and restored output stay local. The response must be validated before restoration.
 
 ## Component responsibilities
 
@@ -85,7 +99,6 @@ Only the masked ticket and versioned task prompt may cross the boundary. Detecti
 | --- | --- |
 | Input layer | Read one synthetic ticket for one request |
 | Detector | Find explainable exact-list and structured-pattern matches |
-| Policy | Decide whether each detected category is masked or removed |
 | Masker | Replace selected spans and create the request-local mapping |
 | Provider interface | Send only masked content; M2 uses an offline mock |
 | Validator | Reject malformed, unknown, modified, or unauthorized placeholders |
@@ -154,7 +167,7 @@ The M1 spike confirms that the selected runtime can read and echo text.
 
 - Runtime: Python 3.12.14
 - File: `src/tech_spike.py`
-- Exact command: `python src/tech_spike.py`
+- Exact command executed from the repository root: `& 'C:\Users\gruss\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe' src/tech_spike.py`
 - Synthetic input: `Ticket INC-1042 reports a Wi-Fi problem.`
 - Observed output: `Echo: Ticket INC-1042 reports a Wi-Fi problem.`
 
@@ -166,3 +179,19 @@ The spike does not detect, mask, send, validate, or restore information.
 2. Use request-scoped placeholders containing a request ID to support later authorization checks.
 3. Treat the prompt as task guidance and local validation as the enforcement mechanism.
 4. Use an offline deterministic mock provider for reproducible gateway tests.
+
+## M2 execution trace
+
+For request `r10`, the synthetic input
+
+```text
+Maya Chen cannot connect LT-48291 to Wi-Fi. Ticket INC-1042.
+```
+
+is masked locally as
+
+```text
+[[r10:NAME:1]] cannot connect [[r10:ASSET:1]] to Wi-Fi. Ticket [[r10:TICKET:1]].
+```
+
+The mock provider receives only the masked form. After the response tokens pass validation, the gateway restores `Maya Chen`, `LT-48291`, and `INC-1042` in the final local output.

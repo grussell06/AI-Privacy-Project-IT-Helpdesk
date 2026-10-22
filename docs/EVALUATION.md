@@ -2,7 +2,7 @@
 
 ## M1 planned acceptance cases
 
-All examples are synthetic. These are plans for M2 implementation and are not recorded as executed gateway tests during M1.
+All examples are synthetic. They were planned during M1 and automated for the M2 prototype.
 
 ### AC-01: Ordinary input
 
@@ -81,7 +81,7 @@ Summary: [[r7:NAME:99]] reports that [[r7:ASSET:1]] has no audio.
 - The gateway returns a controlled validation error.
 - It does not partially restore the response or return an unmasked fallback.
 
-## Additional planned case
+## Additional automated case
 
 ### AC-05: Reserved placeholder syntax in input
 
@@ -96,7 +96,7 @@ The ticket text contains [[r7:NAME:1]] as typed content.
 - The gateway rejects the input with a controlled error before provider processing.
 - It does not confuse user text with gateway-issued placeholders.
 
-## Measures for later milestones
+## Measures reserved for later milestones
 
 - Count true positives, false positives, and false negatives for labeled detections.
 - Calculate precision and recall when their denominators are nonzero.
@@ -104,6 +104,24 @@ The ticket text contains [[r7:NAME:1]] as typed content.
 - Record invalid placeholder findings separately from restoration results.
 - Evaluate privacy behavior and summary usefulness separately.
 
-## M1 evidence status
+## M2 executed test results
 
-The read-and-echo tech spike is the only executed program at M1. The cases above become executable acceptance tests as their corresponding behavior is implemented in M2 and M3.
+The M1 cases are now automated in `tests/test_gateway.py`. The suite also checks different names within one request, a malformed provider placeholder, a foreign-request placeholder, and reserved placeholder syntax in input.
+
+Command:
+
+```powershell
+$env:PYTHONPATH='src'
+python -m unittest discover -s tests -v
+```
+
+Observed result on October 15, 2026:
+
+```text
+Ran 8 tests
+OK
+```
+
+The ordinary-input test verifies that each original protected value is absent from the masked outbound text and present after authorized local restoration. The repeated-value test verifies token reuse. Error tests verify that invalid output is rejected rather than partially restored.
+
+These tests use the offline deterministic mock or a fixed invalid response. They are not real-model results.
