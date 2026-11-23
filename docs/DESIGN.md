@@ -6,9 +6,9 @@ The intended user is an internal IT support technician. The technician receives 
 
 The motivation is to preserve the useful technical context while preventing unnecessary disclosure of identifiers to an external AI provider. A summary such as "Windows laptop cannot connect to the office Wi-Fi after a password reset" remains useful without exposing the employee's name, email address, device asset ID, or ticket number.
 
-## Implemented M2 sensitive-data categories
+## Implemented sensitive-data categories
 
-The M2 prototype supports four categories:
+The M3 system supports four categories:
 
 | Category | Synthetic example | Implemented detection method |
 | --- | --- | --- |
@@ -54,7 +54,7 @@ M2 implements one command-line, single-turn pipeline using synthetic tickets and
 - automated versions of the relevant M1 acceptance cases;
 - controlled failure for invalid reserved placeholders.
 
-MASK/REMOVE category policy, full cross-request state-lifetime testing, overlap hardening, simulated provider failures, and prompt comparison remain later-milestone work. The M2 validator does reject a foreign request token as a supplementary safety check, but this does not replace later cross-request isolation work.
+At M2, MASK/REMOVE policy, full request-state testing, overlap hardening, simulated provider failures, and prompt comparison were deferred. M3 implements and evaluates these behaviors.
 
 ## M2 implementation
 
@@ -68,7 +68,25 @@ The working prototype implements one complete request through these classes:
 - `PrivacyGateway` controls the pipeline and keeps the mapping inside one call.
 - `cli.py` converts between command-line JSON and controlled result objects.
 
-The JSON wrapper is isolated because the separate course I/O Contract was not available in the project files when this prototype was implemented. Its field names must be checked against that specification before the M2 submission.
+The repository documents and tests its JSON command-line contract; there is no separate shared course contract.
+
+## M3 reliability architecture
+
+M3 separates `Detector`, `OverlapResolver`, `PolicyEngine`, `RequestMapping`, `Masker`, provider interface, `ResponseValidator`, `Restorer`, and `PrivacyGateway`. Longest matches win overlaps; equal lengths use EMAIL, ASSET, TICKET, then NAME priority. Missing policies default to MASK. REMOVE deletes a value without creating a restorable token.
+
+`RequestMapping` exists for one `process()` call and is cleared in `finally`, including provider and validation failures. Providers receive only masked/removed text. Timeouts, provider exceptions, malformed responses, and invalid placeholders become controlled errors; there is no unmasked retry.
+
+## Python programming-language design
+
+**Types and contracts:** Frozen dataclasses (`Match`, `PolicyDecision`, `GatewayResult`, and evaluation result types) make data shapes explicit. `Policy` limits policy states to MASK and REMOVE. The provider `Protocol` defines `summarize(masked_ticket, prompt_version)`. Runtime checks protect JSON and provider boundaries. Evidence: CLI boundary and invalid-prompt tests.
+
+**State lifetime:** `RequestMapping` owns placeholder values for one request. `PrivacyGateway.process()` creates it locally and closes it in `finally`. Evidence: mapping-cleanup, independent-request, and reused-request-ID tests.
+
+**Effects:** File loading, standard input/output, and provider calls are isolated from deterministic transformations. Evidence: provider call-count tests and byte-identical repeated evaluation runs.
+
+**Interfaces:** Provider and mapping factories are injected into `PrivacyGateway`. Evidence: `FixedProvider`, `RaisingProvider`, and `CapturingFactory` in `tests/test_gateway.py`.
+
+**Error handling:** Components raise `GatewayError` with stable codes including `INVALID_POLICY`, `INVALID_PLACEHOLDER`, `MALFORMED_RESPONSE`, `PROVIDER_TIMEOUT`, and `PROVIDER_ERROR`. Evidence: invalid-policy, malformed-response, timeout, provider-error, and CLI tests.
 
 ## Data flow and trust boundary
 
@@ -100,7 +118,7 @@ Only the masked ticket and versioned task prompt may cross the boundary. Detecti
 | Input layer | Read one synthetic ticket for one request |
 | Detector | Find explainable exact-list and structured-pattern matches |
 | Masker | Replace selected spans and create the request-local mapping |
-| Provider interface | Send only masked content; M2 uses an offline mock |
+| Provider interface | Send only masked content to the offline mock |
 | Validator | Reject malformed, unknown, modified, or unauthorized placeholders |
 | Restorer | Restore only placeholders valid for the current request |
 | Output layer | Return a useful summary or a controlled error |
@@ -118,13 +136,13 @@ The initial form is:
 Example placeholders:
 
 ```text
-[[r7:NAME:1]]
-[[r7:EMAIL:1]]
-[[r7:ASSET:1]]
-[[r7:TICKET:1]]
+[[g8fa21c:NAME:1]]
+[[g8fa21c:EMAIL:1]]
+[[g8fa21c:ASSET:1]]
+[[g8fa21c:TICKET:1]]
 ```
 
-The request ID supports later checks against placeholders from another request. The category keeps validation explainable, and the index distinguishes different entities of the same category. Repeated occurrences of the same original value within one request should use the same placeholder. Input containing reserved placeholder syntax will be rejected rather than treated as ordinary text.
+The gateway generates a fresh opaque namespace for each invocation rather than embedding the caller's request ID. This prevents request-ID leaks and stale-token collisions when IDs are reused. The category and index remain explainable, and repeated occurrences reuse one token. Reserved placeholder syntax in input is rejected.
 
 ## Initial provider prompt
 

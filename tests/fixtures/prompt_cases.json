@@ -1,0 +1,5 @@
+[
+  {"id":"wifi","masked_text":"[[p1:NAME:1]] cannot connect [[p1:ASSET:1]] to Wi-Fi after a password reset.","required":["Wi-Fi","password reset"],"forbidden":["confirmed hardware failure","motherboard was replaced"]},
+  {"id":"signin","masked_text":"[[p2:NAME:1]] cannot sign in. Reply to [[p2:EMAIL:1]] and notify [[p2:NAME:1]] at [[p2:EMAIL:1]].","required":["cannot sign in"],"forbidden":["account was deleted","motherboard was replaced"]},
+  {"id":"sparse","masked_text":"The conference-room display is blank.","required":["not provided"],"forbidden":["cable is loose","motherboard was replaced"]}
+]

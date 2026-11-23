@@ -1,0 +1,9 @@
+[
+  {"id":"ordinary","text":"Maya Chen uses maya.chen@example.test on LT-48291 for INC-1042.","expected":[["NAME","Maya Chen",1],["EMAIL","maya.chen@example.test",1],["ASSET","LT-48291",1],["TICKET","INC-1042",1]]},
+  {"id":"punctuation","text":"(Jordan Lee), ticket INC-2000.","expected":[["NAME","Jordan Lee",1],["TICKET","INC-2000",1]]},
+  {"id":"repeated","text":"Priya Shah told Priya Shah about INC-2001.","expected":[["NAME","Priya Shah",1],["NAME","Priya Shah",2],["TICKET","INC-2001",1]]},
+  {"id":"overlap","text":"Evan Lane called.","expected":[["NAME","Evan Lane",1]]},
+  {"id":"none","text":"The display is blank.","expected":[]},
+  {"id":"false_positive","text":"The public demo code is LT-12345.","expected":[]},
+  {"id":"false_negative","text":"Call 404-555-0100.","expected":[["PHONE","404-555-0100",1]]}
+]

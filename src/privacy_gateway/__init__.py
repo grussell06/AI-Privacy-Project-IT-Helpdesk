@@ -3,4 +3,3 @@
 from .gateway import GatewayError, GatewayResult, PrivacyGateway
 
 __all__ = ["GatewayError", "GatewayResult", "PrivacyGateway"]
-      

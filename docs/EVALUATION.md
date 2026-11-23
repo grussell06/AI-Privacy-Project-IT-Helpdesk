@@ -96,7 +96,7 @@ The ticket text contains [[r7:NAME:1]] as typed content.
 - The gateway rejects the input with a controlled error before provider processing.
 - It does not confuse user text with gateway-issued placeholders.
 
-## Measures reserved for later milestones
+## Evaluation measures
 
 - Count true positives, false positives, and false negatives for labeled detections.
 - Calculate precision and recall when their denominators are nonzero.
@@ -125,3 +125,113 @@ OK
 The ordinary-input test verifies that each original protected value is absent from the masked outbound text and present after authorized local restoration. The repeated-value test verifies token reuse. Error tests verify that invalid output is rejected rather than partially restored.
 
 These tests use the offline deterministic mock or a fixed invalid response. They are not real-model results.
+
+## M3 automated test results
+
+Command:
+
+```powershell
+$env:PYTHONPATH='src'
+python -m unittest discover -s tests -v
+```
+
+Observed November 17, 2026:
+
+```text
+Ran 41 tests
+OK
+```
+
+The expanded suite covers normal and repeated values, different entities, deterministic overlaps, MASK and REMOVE policy, invalid policies, independent requests, mapping cleanup, malformed/unknown/foreign placeholders, malformed responses, provider timeout/error behavior, metrics, leaks, and prompt comparison.
+
+## Detection and privacy results
+
+The labeled synthetic fixture produced:
+
+| Measure | Result |
+| --- | ---: |
+| True positives | 10 |
+| False positives | 1 |
+| False negatives | 1 |
+| Precision | 0.9091 |
+| Recall | 0.9091 |
+| Outbound privacy leaks | 1 |
+
+The intentional false positive is an asset-shaped public demo code (`LT-12345`) that the narrow pattern masks. The intentional false negative and leak is an unsupported phone number (`404-555-0100`). This shows the gateway protects supported detections but does not provide universal sensitive-data detection.
+
+## Prompt comparison
+
+Provider kind: **offline deterministic mock**. No real-model results were collected.
+
+The same three masked cases were evaluated with both prompts. Each dimension was scored 0 or 1: required information, output format, placeholder handling, no invented information, and task usefulness.
+
+| Case | v1 | v2 | Observation |
+| --- | ---: | ---: | --- |
+| Wi-Fi/password reset | 5/5 | 5/5 | Both preserved tokens and required facts. |
+| Repeated sign-in values | 5/5 | 5/5 | Both preserved repeated relevant tokens. |
+| Sparse display ticket | 3/5 | 5/5 | v1 omitted an explicit missing-context statement; v2 reported `not provided`. |
+| **Total** | **13/15** | **15/15** | **v2 selected.** |
+
+Per-dimension scores (`R` required information, `F` format, `P` placeholders, `I` no listed or identifier invention, `U` usefulness):
+
+| Case/version | R | F | P | I | U | Total |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Wi-Fi v1 | 1 | 1 | 1 | 1 | 1 | 5 |
+| Sign-in v1 | 1 | 1 | 1 | 1 | 1 | 5 |
+| Sparse v1 | 0 | 1 | 1 | 1 | 0 | 3 |
+| Wi-Fi v2 | 1 | 1 | 1 | 1 | 1 | 5 |
+| Sign-in v2 | 1 | 1 | 1 | 1 | 1 | 5 |
+| Sparse v2 | 1 | 1 | 1 | 1 | 1 | 5 |
+
+Complete Wi-Fi and repeated sign-in outputs:
+
+```text
+Wi-Fi v1
+Summary: [[p1:NAME:1]] cannot connect [[p1:ASSET:1]] to Wi-Fi after a password reset.
+Suggested steps:
+1. Confirm the reported symptoms.
+2. Check relevant device settings.
+
+Wi-Fi v2
+Summary: [[p1:NAME:1]] cannot connect [[p1:ASSET:1]] to Wi-Fi after a password reset.
+Suggested steps:
+1. Confirm the reported symptom and any recent change.
+2. Check the affected system settings using only the supplied ticket facts.
+
+Sign-in v1
+Summary: [[p2:NAME:1]] cannot sign in. Reply to [[p2:EMAIL:1]] and notify [[p2:NAME:1]] at [[p2:EMAIL:1]].
+Suggested steps:
+1. Confirm the reported symptoms.
+2. Check relevant device settings.
+
+Sign-in v2
+Summary: [[p2:NAME:1]] cannot sign in. Reply to [[p2:EMAIL:1]] and notify [[p2:NAME:1]] at [[p2:EMAIL:1]].
+Suggested steps:
+1. Confirm the reported symptom and any recent change.
+2. Check the affected system settings using only the supplied ticket facts.
+```
+
+Representative sparse outputs:
+
+```text
+v1 Summary: The conference-room display is blank.
+Suggested steps:
+1. Confirm the reported symptoms.
+2. Check relevant device settings.
+```
+
+```text
+v2 Summary: The conference-room display is blank. Diagnostic context: not provided.
+Suggested steps:
+1. Confirm the reported symptom and any recent change.
+2. Check the affected system settings using only the supplied ticket facts.
+```
+
+Prompt v2 performed better because its explicit missing-information rule improved the sparse case while preserving the required format and placeholders. This conclusion applies only to the deterministic mock experiment.
+
+## Remaining limitations
+
+- Exact-name matching only recognizes entries in the local synthetic list.
+- Structured patterns can create false positives and miss unsupported formats.
+- Prompt scores are rule-based mock results rather than human or real-model evaluation.
+- The system is single-turn and command-line only.

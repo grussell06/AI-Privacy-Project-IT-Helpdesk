@@ -1,112 +1,155 @@
-"""Automated M2 acceptance tests for the privacy gateway."""
-
 from __future__ import annotations
 
 import unittest
 
-from privacy_gateway.gateway import GatewayError, MockProvider, PrivacyGateway
+from privacy_gateway.gateway import GatewayError, PrivacyGateway
+from privacy_gateway.mapping import RequestMapping
+from privacy_gateway.provider import ProviderFailure, ProviderTimeout
 
 
-class FixedProvider(MockProvider):
-    def __init__(self, response: str) -> None:
+VALID_STEPS = "\nSuggested steps:\n1. Check the device."
+
+
+class FixedProvider:
+    def __init__(self, response: object) -> None:
         self.response = response
+        self.calls: list[tuple[str, str]] = []
 
-    def summarize(self, masked_ticket: str) -> str:
-        return self.response
+    def summarize(self, masked_ticket: str, prompt_version: str) -> str:
+        self.calls.append((masked_ticket, prompt_version))
+        return self.response  # type: ignore[return-value]
+
+
+class RaisingProvider(FixedProvider):
+    def __init__(self, error: Exception) -> None:
+        super().__init__("")
+        self.error = error
+
+    def summarize(self, masked_ticket: str, prompt_version: str) -> str:
+        self.calls.append((masked_ticket, prompt_version))
+        raise self.error
+
+
+class CapturingFactory:
+    def __init__(self) -> None:
+        self.created: list[RequestMapping] = []
+
+    def __call__(self, request_id: str) -> RequestMapping:
+        mapping = RequestMapping(request_id)
+        self.created.append(mapping)
+        return mapping
 
 
 class PrivacyGatewayTests(unittest.TestCase):
-    def setUp(self) -> None:
-        self.gateway = PrivacyGateway.default()
+    def test_request_id_never_appears_in_outbound_placeholder(self) -> None:
+        result = PrivacyGateway.default().process("INC-1042", "Ticket INC-1042 needs review.")
+        self.assertNotIn("INC-1042", result.masked_text)
+
+    def test_reused_public_request_id_gets_unique_placeholder_namespace(self) -> None:
+        first = PrivacyGateway.default().process("same", "Maya Chen cannot sign in.")
+        second = PrivacyGateway.default().process("same", "Jordan Lee reports no audio.")
+        self.assertNotEqual(first.masked_text.split()[0], second.masked_text.split()[0])
+
+    def test_invalid_prompt_types_do_not_call_provider(self) -> None:
+        for value in ("", False, 0, [], {}):
+            provider = FixedProvider("Summary: x" + VALID_STEPS)
+            with self.subTest(value=value), self.assertRaises(GatewayError) as caught:
+                PrivacyGateway(PrivacyGateway.default().detector, provider).process("r0", "text", prompt_version=value)  # type: ignore[arg-type]
+            self.assertEqual(caught.exception.code, "INVALID_PROMPT")
+            self.assertEqual(provider.calls, [])
 
     def test_ordinary_input_masks_and_restores_supported_values(self) -> None:
-        text = (
-            "Maya Chen reports that laptop LT-48291 cannot connect to Wi-Fi. "
-            "Contact maya.chen@example.test. Ticket INC-1042."
+        result = PrivacyGateway.default().process(
+            "r1", "Maya Chen uses maya.chen@example.test on LT-48291 for INC-1042."
         )
+        for value in ("Maya Chen", "maya.chen@example.test", "LT-48291", "INC-1042"):
+            self.assertNotIn(value, result.masked_text)
+            self.assertIn(value, result.output)
 
-        result = self.gateway.process("r1", text)
-
-        for protected in (
-            "Maya Chen",
-            "LT-48291",
-            "maya.chen@example.test",
-            "INC-1042",
-        ):
-            self.assertNotIn(protected, result.masked_text)
-            self.assertIn(protected, result.output)
-        self.assertIn("[[r1:NAME:1]]", result.masked_text)
-        self.assertIn("[[r1:EMAIL:1]]", result.masked_text)
-        self.assertIn("[[r1:ASSET:1]]", result.masked_text)
-        self.assertIn("[[r1:TICKET:1]]", result.masked_text)
-
-    def test_repeated_values_reuse_the_same_placeholder(self) -> None:
-        text = (
-            "Maya Chen cannot sign in. Maya Chen requested an update at "
-            "maya.chen@example.test; reply to maya.chen@example.test. Ticket INC-1043."
+    def test_remove_value_is_not_restored(self) -> None:
+        result = PrivacyGateway.default().process(
+            "r2", "Email maya.chen@example.test about INC-1042.", {"EMAIL": "REMOVE"}
         )
+        self.assertNotIn("maya.chen@example.test", result.masked_text)
+        self.assertNotIn("maya.chen@example.test", result.output)
 
-        result = self.gateway.process("r2", text)
+    def test_independent_requests_reject_foreign_placeholder(self) -> None:
+        provider = FixedProvider("Summary: [[r1:NAME:1]] reports audio trouble." + VALID_STEPS)
+        with self.assertRaises(GatewayError) as caught:
+            PrivacyGateway(PrivacyGateway.default().detector, provider).process(
+                "r2", "Jordan Lee reports audio trouble."
+            )
+        self.assertEqual(caught.exception.code, "INVALID_PLACEHOLDER")
 
-        self.assertEqual(result.masked_text.count("[[r2:NAME:1]]"), 2)
-        self.assertEqual(result.masked_text.count("[[r2:EMAIL:1]]"), 2)
-        self.assertNotIn("[[r2:NAME:2]]", result.masked_text)
-        self.assertEqual(result.output.count("Maya Chen"), 2)
+    def test_unknown_placeholder_is_rejected(self) -> None:
+        provider = FixedProvider("Summary: [[r3:NAME:99]] reports trouble." + VALID_STEPS)
+        with self.assertRaises(GatewayError) as caught:
+            PrivacyGateway(PrivacyGateway.default().detector, provider).process("r3", "Jordan Lee reports trouble.")
+        self.assertEqual(caught.exception.code, "INVALID_PLACEHOLDER")
 
-    def test_different_names_receive_different_placeholders(self) -> None:
-        result = self.gateway.process(
-            "r3", "Maya Chen transferred ticket INC-1045 to Jordan Lee."
-        )
+    def test_malformed_placeholder_is_rejected(self) -> None:
+        provider = FixedProvider("Summary: [[r3:NAME:1] reports trouble." + VALID_STEPS)
+        with self.assertRaises(GatewayError) as caught:
+            PrivacyGateway(PrivacyGateway.default().detector, provider).process("r3", "Jordan Lee reports trouble.")
+        self.assertEqual(caught.exception.code, "INVALID_PLACEHOLDER")
 
-        self.assertIn("[[r3:NAME:1]]", result.masked_text)
-        self.assertIn("[[r3:NAME:2]]", result.masked_text)
+    def test_modified_placeholder_is_rejected(self) -> None:
+        provider = FixedProvider("Summary: [[r3:NAME:1x]] reports trouble." + VALID_STEPS)
+        with self.assertRaises(GatewayError) as caught:
+            PrivacyGateway(PrivacyGateway.default().detector, provider).process("r3", "Jordan Lee reports trouble.")
+        self.assertEqual(caught.exception.code, "INVALID_PLACEHOLDER")
 
-    def test_no_sensitive_data_passes_through_unchanged(self) -> None:
-        text = "The conference-room display is blank after waking from sleep."
+    def test_malformed_response_variants(self) -> None:
+        invalid = [None, "", "Summary: text", "Suggested steps:\n1. X\nSummary: text", "summary: text" + VALID_STEPS,
+                   "Summary: \nSuggested steps:\n1. X", "Summary: text\nSuggested steps:\nnone",
+                   "Summary: text\nSuggested steps:\n1.\n\nOnly prose",
+                   "Summary: text\nSuggested steps:\n1. X\nSummary: duplicate"]
+        for response in invalid:
+            with self.subTest(response=response), self.assertRaises(GatewayError) as caught:
+                PrivacyGateway(PrivacyGateway.default().detector, FixedProvider(response)).process("r4", "No sensitive data.")
+            self.assertEqual(caught.exception.code, "MALFORMED_RESPONSE")
 
-        result = self.gateway.process("r4", text)
+    def test_provider_timeout_is_controlled_and_not_retried(self) -> None:
+        provider = RaisingProvider(ProviderTimeout())
+        with self.assertRaises(GatewayError) as caught:
+            PrivacyGateway(PrivacyGateway.default().detector, provider).process("r5", "Maya Chen needs help.")
+        self.assertEqual(caught.exception.code, "PROVIDER_TIMEOUT")
+        self.assertEqual(len(provider.calls), 1)
+        self.assertNotIn("Maya Chen", provider.calls[0][0])
 
-        self.assertEqual(result.masked_text, text)
-        self.assertIn(text, result.output)
+    def test_provider_error_is_controlled_and_not_retried(self) -> None:
+        provider = RaisingProvider(ProviderFailure())
+        with self.assertRaises(GatewayError) as caught:
+            PrivacyGateway(PrivacyGateway.default().detector, provider).process("r6", "Maya Chen needs help.")
+        self.assertEqual(caught.exception.code, "PROVIDER_ERROR")
+        self.assertEqual(len(provider.calls), 1)
 
-    def test_unknown_provider_placeholder_returns_controlled_error(self) -> None:
-        gateway = PrivacyGateway(
-            self.gateway.detector,
-            FixedProvider("Summary: [[r5:NAME:99]] has no audio."),
-        )
+    def test_mapping_is_closed_after_success_and_failure(self) -> None:
+        for provider in (FixedProvider("Summary: Safe text." + VALID_STEPS), RaisingProvider(ProviderFailure())):
+            factory = CapturingFactory()
+            gateway = PrivacyGateway(PrivacyGateway.default().detector, provider, mapping_factory=factory)
+            try:
+                gateway.process("r7", "Maya Chen needs help.")
+            except GatewayError:
+                pass
+            self.assertEqual(len(factory.created), 1)
+            self.assertTrue(factory.created[0].closed)
+            self.assertEqual(len(factory.created[0]), 0)
 
-        with self.assertRaises(GatewayError) as context:
-            gateway.process("r5", "Jordan Lee reports no audio on LT-10007.")
+    def test_mapping_is_closed_after_each_failure_class(self) -> None:
+        providers = [RaisingProvider(ProviderTimeout()), RaisingProvider(ProviderFailure()),
+                     FixedProvider(""), FixedProvider("Summary: [[foreign:NAME:1]] x." + VALID_STEPS)]
+        for provider in providers:
+            factory = CapturingFactory()
+            with self.subTest(provider=type(provider).__name__), self.assertRaises(GatewayError):
+                PrivacyGateway(PrivacyGateway.default().detector, provider, mapping_factory=factory).process("r9", "Maya Chen needs help.")
+            self.assertTrue(factory.created[0].closed)
+            self.assertEqual(len(factory.created[0]), 0)
 
-        self.assertEqual(context.exception.code, "INVALID_PLACEHOLDER")
-
-    def test_malformed_provider_placeholder_returns_controlled_error(self) -> None:
-        gateway = PrivacyGateway(
-            self.gateway.detector,
-            FixedProvider("Summary: [[r5:NAME:1] has no audio."),
-        )
-
-        with self.assertRaises(GatewayError) as context:
-            gateway.process("r5", "Jordan Lee reports no audio on LT-10007.")
-
-        self.assertEqual(context.exception.code, "INVALID_PLACEHOLDER")
-
-    def test_foreign_request_placeholder_returns_controlled_error(self) -> None:
-        gateway = PrivacyGateway(
-            self.gateway.detector,
-            FixedProvider("Summary: [[r6:NAME:1]] has no audio."),
-        )
-
-        with self.assertRaises(GatewayError) as context:
-            gateway.process("r7", "Jordan Lee reports no audio on LT-10007.")
-
-        self.assertEqual(context.exception.code, "INVALID_PLACEHOLDER")
-
-    def test_reserved_placeholder_syntax_in_input_is_rejected(self) -> None:
-        with self.assertRaises(GatewayError) as context:
-            self.gateway.process("r8", "The ticket contains [[r8:NAME:1]].")
-
-        self.assertEqual(context.exception.code, "RESERVED_SYNTAX")
+    def test_reserved_syntax_in_input_is_rejected(self) -> None:
+        with self.assertRaises(GatewayError) as caught:
+            PrivacyGateway.default().process("r8", "Contains [[r8:NAME:1]].")
+        self.assertEqual(caught.exception.code, "RESERVED_SYNTAX")
 
 
 if __name__ == "__main__":
